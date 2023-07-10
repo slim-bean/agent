@@ -68,7 +68,6 @@ func New(o component.Options, args Arguments) (*Component, error) {
 		opts:      o,
 		handler:   loki.NewLogsReceiver(),
 		receivers: args.ForwardTo,
-		buf:       bytes.NewBuffer(nil),
 	}
 
 	receiver := prometheus.NewInterceptor(
@@ -108,15 +107,15 @@ func New(o component.Options, args Arguments) (*Component, error) {
 				Value: fmt.Sprintf("%v", v),
 			})
 
-			c.buf.Reset()
+			buf := bytes.NewBuffer(nil)
 			for i, lbl := range lbls {
-				fmt.Fprint(c.buf, lbl.Name)
-				fmt.Fprint(c.buf, "=")
-				writeStringValue(c.buf, lbl.Value)
+				fmt.Fprint(buf, lbl.Name)
+				fmt.Fprint(buf, "=")
+				writeStringValue(buf, lbl.Value)
 				if i < len(lbls)-1 {
-					fmt.Fprint(c.buf, " ")
+					fmt.Fprint(buf, " ")
 				} else {
-					fmt.Fprint(c.buf, "\n")
+					fmt.Fprint(buf, "\n")
 				}
 			}
 
@@ -126,7 +125,7 @@ func New(o component.Options, args Arguments) (*Component, error) {
 					"__encoding__": "metric"},
 				Entry: logproto.Entry{
 					Timestamp: timestamp.Time(t),
-					Line:      c.buf.String(),
+					Line:      buf.String(),
 				},
 			}
 
