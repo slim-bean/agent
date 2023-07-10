@@ -12,6 +12,8 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
+	"k8s.io/client-go/kubernetes"
+
 	"github.com/grafana/agent/component"
 	"github.com/grafana/agent/component/common/config"
 	commonk8s "github.com/grafana/agent/component/common/kubernetes"
@@ -19,7 +21,6 @@ import (
 	"github.com/grafana/agent/component/common/loki/positions"
 	"github.com/grafana/agent/component/discovery"
 	"github.com/grafana/agent/component/loki/source/kubernetes/kubetail"
-	"k8s.io/client-go/kubernetes"
 )
 
 func init() {
@@ -41,6 +42,14 @@ type Arguments struct {
 
 	// Client settings to connect to Kubernetes.
 	Client commonk8s.ClientArguments `river:"client,block,optional"`
+
+	Clustering Clustering `river:"clustering,block,optional"`
+}
+
+// Clustering holds values that configure clustering-specific behavior.
+type Clustering struct {
+	// TODO(@tpaschalis) Move this block to a shared place for all components using clustering.
+	Enabled bool `river:"enabled,attr"`
 }
 
 // DefaultArguments holds default settings for loki.source.kubernetes.
@@ -172,9 +181,11 @@ func (c *Component) Update(args component.Arguments) error {
 	}
 
 	// Convert input targets into targets to give to tailer.
-	targets := make([]*kubetail.Target, 0, len(newArgs.Targets))
+	dt := discovery.NewDistributedTargets(c.args.Clustering.Enabled, c.opts.Clusterer.Node, newArgs.Targets)
+	ct := dt.Get()
+	targets := make([]*kubetail.Target, 0, len(ct))
 
-	for _, inTarget := range newArgs.Targets {
+	for _, inTarget := range ct {
 		lset := inTarget.Labels()
 		processed, err := kubetail.PrepareLabels(lset, c.opts.ID)
 		if err != nil {
@@ -193,6 +204,13 @@ func (c *Component) Update(args component.Arguments) error {
 
 	c.args = newArgs
 	return nil
+}
+
+// ClusterUpdatesRegistration implements component.ClusterComponent.
+func (c *Component) ClusterUpdatesRegistration() bool {
+	c.mut.Lock()
+	defer c.mut.Unlock()
+	return c.args.Clustering.Enabled
 }
 
 // getTailerOptions gets tailer options from arguments. If args hasn't changed
