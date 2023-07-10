@@ -168,9 +168,26 @@ func (t *tailer) tail(ctx context.Context, handler loki.EntryHandler) error {
 	if err != nil {
 		return err
 	}
+
+	lastLineReceived := time.Now()
+
 	go func() {
-		<-ctx.Done()
-		_ = stream.Close()
+		tk := time.NewTicker(1 * time.Second)
+		defer func() {
+			tk.Stop()
+			_ = stream.Close()
+		}()
+
+		select {
+		case <-ctx.Done():
+			return
+		case <-tk.C:
+			if time.Since(lastLineReceived) > 10*time.Second {
+				level.Info(t.log).Log("msg", "no log lines received in 10 seconds; closing stream")
+				return
+			}
+		}
+
 	}()
 
 	level.Info(t.log).Log("msg", "opened log stream", "start time", lastReadTime)
@@ -184,6 +201,9 @@ func (t *tailer) tail(ctx context.Context, handler loki.EntryHandler) error {
 		// Try processing the line before handling the error, since data may still
 		// be returned alongside an EOF.
 		if len(line) != 0 {
+
+			lastLineReceived = time.Now()
+
 			entryTimestamp, entryLine := parseKubernetesLog(line)
 			if !entryTimestamp.After(lastReadTime) {
 				continue
