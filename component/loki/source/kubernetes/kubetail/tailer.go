@@ -11,8 +11,6 @@ import (
 
 	"github.com/go-kit/log"
 	"github.com/go-kit/log/level"
-	"github.com/grafana/agent/component/common/loki"
-	"github.com/grafana/agent/pkg/runner"
 	"github.com/grafana/dskit/backoff"
 	"github.com/grafana/loki/pkg/logproto"
 	"github.com/prometheus/common/model"
@@ -20,6 +18,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubetypes "k8s.io/apimachinery/pkg/types"
+
+	"github.com/grafana/agent/component/common/loki"
+	"github.com/grafana/agent/pkg/runner"
 )
 
 // tailerTask is the payload used to create tailers. It implements runner.Task.
@@ -127,7 +128,7 @@ func (t *tailer) tail(ctx context.Context, handler loki.EntryHandler) error {
 	// Set a maximum lifetime of the tail to ensure that connections are
 	// reestablished. This avoids an issue where the Kubernetes API server stops
 	// responding with new logs while the connection is kept open.
-	ctx, cancel := context.WithTimeout(ctx, 1*time.Hour)
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 
 	var (
