@@ -38,6 +38,7 @@ type Arguments struct {
 	ForwardTo []loki.LogsReceiver `river:"forward_to,attr"`
 
 	IncludeMetrics []string `river:"include_metrics,attr,optional"`
+	PromoteLabels  []string `river:"promote_labels,attr,optional"`
 
 	HTTPClientConfig component_config.HTTPClientConfig `river:",squash"`
 }
@@ -108,8 +109,19 @@ func New(o component.Options, args Arguments) (*Component, error) {
 				Value: fmt.Sprintf("%v", v),
 			})
 
+			indexedLabels := model.LabelSet{
+				"metric":       model.LabelValue(nameLabel.Value),
+				"__encoding__": "metric",
+			}
+
 			buf := bytes.NewBuffer(nil)
 			for i, lbl := range lbls {
+				for _, a := range c.args.PromoteLabels {
+					if lbl.Name == a {
+						indexedLabels[model.LabelName(lbl.Name)] = model.LabelValue(lbl.Value)
+					}
+				}
+
 				fmt.Fprint(buf, lbl.Name)
 				fmt.Fprint(buf, "=")
 				writeStringValue(buf, lbl.Value)
@@ -121,9 +133,7 @@ func New(o component.Options, args Arguments) (*Component, error) {
 			}
 
 			c.handler.Chan() <- loki.Entry{
-				Labels: model.LabelSet{
-					"metric":       model.LabelValue(nameLabel.Value),
-					"__encoding__": "metric"},
+				Labels: indexedLabels,
 				Entry: logproto.Entry{
 					Timestamp: timestamp.Time(t),
 					Line:      buf.String(),
