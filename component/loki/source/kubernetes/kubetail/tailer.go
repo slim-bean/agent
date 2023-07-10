@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -128,7 +129,7 @@ func (t *tailer) tail(ctx context.Context, handler loki.EntryHandler) error {
 	// Set a maximum lifetime of the tail to ensure that connections are
 	// reestablished. This avoids an issue where the Kubernetes API server stops
 	// responding with new logs while the connection is kept open.
-	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 1*time.Hour)
 	defer cancel()
 
 	var (
@@ -169,6 +170,7 @@ func (t *tailer) tail(ctx context.Context, handler loki.EntryHandler) error {
 		return err
 	}
 
+	llMut := sync.Mutex{}
 	lastLineReceived := time.Now()
 
 	go func() {
@@ -177,17 +179,20 @@ func (t *tailer) tail(ctx context.Context, handler loki.EntryHandler) error {
 			tk.Stop()
 			_ = stream.Close()
 		}()
-
-		select {
-		case <-ctx.Done():
-			return
-		case <-tk.C:
-			if time.Since(lastLineReceived) > 10*time.Second {
-				level.Info(t.log).Log("msg", "no log lines received in 10 seconds; closing stream")
+		for {
+			select {
+			case <-ctx.Done():
 				return
+			case <-tk.C:
+				llMut.Lock()
+				lr := lastLineReceived
+				llMut.Unlock()
+				if time.Since(lr) > 10*time.Second {
+					level.Info(t.log).Log("msg", "no log lines received in 10 seconds; closing stream")
+					return
+				}
 			}
 		}
-
 	}()
 
 	level.Info(t.log).Log("msg", "opened log stream", "start time", lastReadTime)
@@ -202,7 +207,9 @@ func (t *tailer) tail(ctx context.Context, handler loki.EntryHandler) error {
 		// be returned alongside an EOF.
 		if len(line) != 0 {
 
+			llMut.Lock()
 			lastLineReceived = time.Now()
+			llMut.Unlock()
 
 			entryTimestamp, entryLine := parseKubernetesLog(line)
 			if !entryTimestamp.After(lastReadTime) {
