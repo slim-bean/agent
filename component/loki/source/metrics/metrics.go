@@ -68,6 +68,7 @@ func New(o component.Options, args Arguments) (*Component, error) {
 		opts:      o,
 		handler:   loki.NewLogsReceiver(),
 		receivers: args.ForwardTo,
+		args:      args,
 	}
 
 	receiver := prometheus.NewInterceptor(
