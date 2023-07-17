@@ -171,7 +171,7 @@ func (t *tailer) tail(ctx context.Context, handler loki.EntryHandler) error {
 		return err
 	}
 
-	calc := NewRollingAverageCalculator(100)
+	calc := NewRollingAverageCalculator(10000, 100, 2*time.Second, maxTailerLifetime)
 
 	go func() {
 		tk := time.NewTicker(1 * time.Second)
@@ -185,14 +185,9 @@ func (t *tailer) tail(ctx context.Context, handler loki.EntryHandler) error {
 				return
 			case <-tk.C:
 				avg := calc.GetAverage()
-				// Not enough data to calculate an average, so we'll just use a default
-				if avg == time.Duration(0) {
-					avg = maxTailerLifetime
-				}
-
-				lr := calc.GetLast()
-				if time.Since(calc.GetLast()) > avg {
-					level.Info(t.log).Log("msg", "rolling average duration of time between logs expected to receive a log line by now and didn't, closing and re-opening tailer", "rolling_average", avg, "last", lr)
+				s := time.Since(calc.GetLast())
+				if s > avg {
+					level.Info(t.log).Log("msg", "rolling average duration of time between logs expected to receive a log line by now and didn't, closing and re-opening tailer", "rolling_average", avg, "time_since_last", s)
 					return
 				}
 			}

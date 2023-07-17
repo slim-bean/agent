@@ -6,18 +6,26 @@ import (
 )
 
 type RollingAverageCalculator struct {
-	mtx           sync.Mutex
-	window        []time.Duration
-	windowSize    int
+	mtx        sync.Mutex
+	window     []time.Duration
+	windowSize int
+
+	minEntries      int
+	minDuration     time.Duration
+	defaultDuration time.Duration
+
 	currentIndex  int
 	prevTimestamp time.Time
 }
 
-func NewRollingAverageCalculator(windowSize int) *RollingAverageCalculator {
+func NewRollingAverageCalculator(windowSize, minEntries int, minDuration, defaultDuration time.Duration) *RollingAverageCalculator {
 	return &RollingAverageCalculator{
-		windowSize:   windowSize,
-		window:       make([]time.Duration, windowSize),
-		currentIndex: -1,
+		windowSize:      windowSize,
+		window:          make([]time.Duration, windowSize),
+		minEntries:      minEntries,
+		minDuration:     minDuration,
+		defaultDuration: defaultDuration,
+		currentIndex:    -1,
 	}
 }
 
@@ -54,10 +62,14 @@ func (r *RollingAverageCalculator) GetAverage() time.Duration {
 			count++
 		}
 	}
-	if count == 0 {
-		return time.Duration(0)
+	if count == 0 || count < r.minEntries {
+		return r.defaultDuration
 	}
-	return total / time.Duration(count)
+	d := total / time.Duration(count)
+	if d < r.minDuration {
+		return r.minDuration
+	}
+	return d
 }
 
 func (r *RollingAverageCalculator) GetLast() time.Time {
