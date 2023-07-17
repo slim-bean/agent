@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/go-kit/log"
@@ -31,6 +30,8 @@ type tailerTask struct {
 }
 
 var _ runner.Task = (*tailerTask)(nil)
+
+const maxTailerLifetime = 1 * time.Hour
 
 func (tt *tailerTask) Hash() uint64 { return tt.Target.Hash() }
 
@@ -129,7 +130,7 @@ func (t *tailer) tail(ctx context.Context, handler loki.EntryHandler) error {
 	// Set a maximum lifetime of the tail to ensure that connections are
 	// reestablished. This avoids an issue where the Kubernetes API server stops
 	// responding with new logs while the connection is kept open.
-	ctx, cancel := context.WithTimeout(ctx, 1*time.Hour)
+	ctx, cancel := context.WithTimeout(ctx, maxTailerLifetime)
 	defer cancel()
 
 	var (
@@ -170,8 +171,7 @@ func (t *tailer) tail(ctx context.Context, handler loki.EntryHandler) error {
 		return err
 	}
 
-	llMut := sync.Mutex{}
-	lastLineReceived := time.Now()
+	calc := NewRollingAverageCalculator(100)
 
 	go func() {
 		tk := time.NewTicker(1 * time.Second)
@@ -184,11 +184,15 @@ func (t *tailer) tail(ctx context.Context, handler loki.EntryHandler) error {
 			case <-ctx.Done():
 				return
 			case <-tk.C:
-				llMut.Lock()
-				lr := lastLineReceived
-				llMut.Unlock()
-				if time.Since(lr) > 10*time.Second {
-					level.Info(t.log).Log("msg", "no log lines received in 10 seconds; closing stream")
+				avg := calc.GetAverage()
+				// Not enough data to calculate an average, so we'll just use a default
+				if avg == time.Duration(0) {
+					avg = maxTailerLifetime
+				}
+
+				lr := calc.GetLast()
+				if time.Since(calc.GetLast()) > avg {
+					level.Info(t.log).Log("msg", "rolling average duration of time between logs expected to receive a log line by now and didn't, closing and re-opening tailer", "rolling_average", avg, "last", lr)
 					return
 				}
 			}
@@ -207,9 +211,7 @@ func (t *tailer) tail(ctx context.Context, handler loki.EntryHandler) error {
 		// be returned alongside an EOF.
 		if len(line) != 0 {
 
-			llMut.Lock()
-			lastLineReceived = time.Now()
-			llMut.Unlock()
+			calc.AddTimestamp(time.Now())
 
 			entryTimestamp, entryLine := parseKubernetesLog(line)
 			if !entryTimestamp.After(lastReadTime) {
