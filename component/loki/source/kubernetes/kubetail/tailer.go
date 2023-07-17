@@ -186,8 +186,8 @@ func (t *tailer) tail(ctx context.Context, handler loki.EntryHandler) error {
 			case <-tk.C:
 				avg := calc.GetAverage()
 				s := time.Since(calc.GetLast())
-				if s > avg {
-					level.Info(t.log).Log("msg", "rolling average duration of time between logs expected to receive a log line by now and didn't, closing and re-opening tailer", "rolling_average", avg, "time_since_last", s)
+				if s*3 > avg {
+					level.Info(t.log).Log("msg", "have not seen a log line in 3x average time between lines, closing and re-opening tailer", "rolling_average", avg, "time_since_last", s)
 					return
 				}
 			}
